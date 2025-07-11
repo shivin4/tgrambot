@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from pathlib import Path
-from threading import Thread
+from threading import Thread, Lock
 from functools import wraps
 import asyncio
 
@@ -163,7 +163,9 @@ async def get_notes(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for note_id, enc_text in data["notes"].items():
         try:
             dec_text = decrypt_data(enc_text)
-            msg += f"ID {note_id}: {dec_text}\n\n"
+            # Truncate long notes for display
+            display_text = dec_text[:50] + "..." if len(dec_text) > 50 else dec_text
+            msg += f"ID {note_id}: {display_text}\n\n"
             keyboard.append([InlineKeyboardButton(f"❌ Delete {note_id}", callback_data=f"delete_note_{note_id}")])
         except InvalidToken:
             msg += f"ID {note_id}: [ERROR decrypting]\n\n"
@@ -210,20 +212,15 @@ application.add_handler(CommandHandler("getnotes", get_notes))
 application.add_handler(CommandHandler("deletenote", delete_note))
 application.add_handler(CallbackQueryHandler(button_handler))
 
-# --- Webhook Handler ---
-@app.post("/webhook")
-def webhook():
-    try:
-        json_data = request.get_json(force=True)
-        update = Update.de_json(json_data, application.bot)
-        application.update_queue.put(update)
-        return '', 200
-    except Exception as e:
-        logger.exception(f"⚠️ Webhook error: {e}")
-        return '', 500
+# --- Global event loop reference ---
+bot_loop = None
+loop_lock = Lock()
 
 # --- Application Startup ---
 async def main():
+    global bot_loop
+    with loop_lock:
+        bot_loop = asyncio.get_running_loop()
     await application.initialize()
     await application.bot.set_webhook(WEBHOOK_URL)
     await application.start()
@@ -237,6 +234,34 @@ def run_app():
 
 # Start in a daemon thread
 Thread(target=run_app, daemon=True).start()
+
+# --- Webhook Handler ---
+@app.post("/webhook")
+def webhook():
+    try:
+        json_data = request.get_json(force=True)
+        update = Update.de_json(json_data, application.bot)
+        
+        with loop_lock:
+            if bot_loop is None:
+                logger.warning("Bot event loop not ready yet")
+                return 'Bot not ready', 503
+            
+            # Schedule the update processing in the bot's event loop
+            asyncio.run_coroutine_threadsafe(
+                application.update_queue.put(update),
+                bot_loop
+            )
+        
+        return '', 200
+    except Exception as e:
+        logger.exception(f"⚠️ Webhook error: {e}")
+        return '', 500
+
+# --- Health Check ---
+@app.route('/')
+def health_check():
+    return 'Bot is running', 200
 
 # --- Start Flask app ---
 if __name__ == '__main__':
