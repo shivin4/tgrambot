@@ -210,43 +210,33 @@ application.add_handler(CommandHandler("getnotes", get_notes))
 application.add_handler(CommandHandler("deletenote", delete_note))
 application.add_handler(CallbackQueryHandler(button_handler))
 
-# Run bot async
-async def run_bot():
-    await application.initialize()
-    await application.bot.set_webhook(WEBHOOK_URL)
-    logger.info(f"✅ Webhook set: {WEBHOOK_URL}")
-
-def run_bot_sync():
-    asyncio.run(run_bot())
-
-Thread(target=run_bot_sync, daemon=True).start()
-
+# --- Webhook Handler ---
 @app.post("/webhook")
 def webhook():
     try:
         json_data = request.get_json(force=True)
         update = Update.de_json(json_data, application.bot)
-
-        if update.message:
-            user = update.message.from_user
-            logger.info(f"📩 From: {user.id} ({user.first_name})")
-
-        async def process():
-            if not application._initialized:
-                logger.info("⚙️ Initializing application inside webhook...")
-                await application.initialize()
-            await application.process_update(update)
-
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.create_task(process())
-        else:
-            loop.run_until_complete(process())
-
+        application.update_queue.put(update)
         return '', 200
     except Exception as e:
         logger.exception(f"⚠️ Webhook error: {e}")
         return '', 500
+
+# --- Application Startup ---
+async def main():
+    await application.initialize()
+    await application.bot.set_webhook(WEBHOOK_URL)
+    await application.start()
+    logger.info(f"✅ Bot started with webhook: {WEBHOOK_URL}")
+
+def run_app():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(main())
+    loop.run_forever()
+
+# Start in a daemon thread
+Thread(target=run_app, daemon=True).start()
 
 # --- Start Flask app ---
 if __name__ == '__main__':
