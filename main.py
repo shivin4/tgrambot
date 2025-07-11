@@ -288,14 +288,29 @@ Thread(target=run_bot_sync, daemon=True).start()
 def health_check():
     return "OK", 200
 
-# Webhook endpoint
 @app.post('/webhook')
 def webhook():
-    """Endpoint for Telegram webhook"""
-    json_data = request.get_json()
-    update = Update.de_json(json_data, application.bot)
-    asyncio.run(application.process_update(update))
-    return '', 200
+    try:
+        json_data = request.get_json()
+        update = Update.de_json(json_data, application.bot)
+
+        # 👇 Log user ID for OWNER_ID setup
+        if update.message:
+            user = update.message.from_user
+            logger.info(f"Received message from user ID: {user.id} ({user.first_name})")
+
+        # Handle update using event loop
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            asyncio.create_task(application.process_update(update))
+        else:
+            loop.run_until_complete(application.process_update(update))
+
+        return '', 200
+
+    except Exception as e:
+        logger.exception(f"Webhook error: {e}")
+        return '', 500
 
 
 if __name__ == '__main__':
