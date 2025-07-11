@@ -294,17 +294,24 @@ def webhook():
         json_data = request.get_json()
         update = Update.de_json(json_data, application.bot)
 
-        # 👇 Log user ID for OWNER_ID setup
+        # 👇 Log user info to confirm OWNER_ID
         if update.message:
             user = update.message.from_user
             logger.info(f"Received message from user ID: {user.id} ({user.first_name})")
 
-        # Handle update using event loop
+        # Process update in a safe event loop context
         loop = asyncio.get_event_loop()
+
+        async def process():
+            # ✅ Make sure application is initialized before handling update
+            if not application._initialized:
+                await application.initialize()
+            await application.process_update(update)
+
         if loop.is_running():
-            asyncio.create_task(application.process_update(update))
+            asyncio.create_task(process())
         else:
-            loop.run_until_complete(application.process_update(update))
+            loop.run_until_complete(process())
 
         return '', 200
 
