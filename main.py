@@ -232,6 +232,9 @@ def webhook():
             logger.info(f"📩 From: {user.id} ({user.first_name})")
 
         async def process():
+            if not application._initialized:
+                logger.info("⚙️ Initializing application inside webhook...")
+                await application.initialize()
             await application.process_update(update)
 
         loop = asyncio.get_event_loop()
