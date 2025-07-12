@@ -257,6 +257,15 @@ def webhook():
     except Exception as e:
         logger.exception(f"⚠️ Webhook error: {e}")
         return '', 500
+    
+@app.route('/dump')
+def dump_file():
+    try:
+        with open('data.json', 'r') as f:
+            return f.read(), 200
+    except Exception as e:
+        return f"Error: {e}", 500
+
 
 # --- Health Check ---
 @app.route('/')
